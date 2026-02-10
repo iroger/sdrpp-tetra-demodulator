@@ -51,8 +51,11 @@ jobs:
           cd build
           cmake .. \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_C_STANDARD=11 \
+            -DCMAKE_CXX_STANDARD=17 \
+            -DCMAKE_CXX_EXTENSIONS=OFF \
             -DSDRPP_CORE_ROOT="$GITHUB_WORKSPACE/sdrpp_lib/core" \
-            -DSDRPP_LIB_ROOT="$GITHUB_WORKSPACE/sdrpp_runtime/SDR++.app/Contents/Frameworks" \
+            -DSDRPP_LIB_ROOT="${{ env.APP_PATH }}/Contents/Frameworks" \
             -DSDRPP_MODULE_CMAKE="$GITHUB_WORKSPACE/sdrpp_module_hack.cmake"
 
       - name: Build
