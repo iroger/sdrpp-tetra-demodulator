@@ -1,6 +1,8 @@
 # sdrpp-tetra-demodulator
 Tetra demodulator plugin for SDR++
 
+Modified build file to create macos dylib
+
 Designed to fully demodulate and decode TETRA downlink signals
 
 Thanks to osmo-tetra authors for their great library
