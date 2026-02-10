@@ -43,9 +43,16 @@ jobs:
 
       - name: Patch Hack Code for macOS
         run: |
-          # 1. Change .so to .dylib for the linker
-          sed -i '' 's/libsdrpp_core.so/libsdrpp_core.dylib/g' sdrpp_module_hack.cmake
-          # 2. Fix the include directory logic to point to the correct 'src' folder
+          # 1. Look for the actual library name in the Frameworks folder
+          # It might be 'libsdrpp_core.dylib' or just 'sdrpp_core.dylib'
+          ACTUAL_LIB=$(ls ${{ env.APP_PATH }}/Contents/Frameworks | grep sdrpp_core | head -n 1)
+          echo "Found Core Lib: $ACTUAL_LIB"
+          
+          # 2. Update the hack file to use the correct filename we just found
+          # We replace 'libsdrpp_core.so' with whatever the actual dylib name is
+          sed -i '' "s/libsdrpp_core.so/$ACTUAL_LIB/g" sdrpp_module_hack.cmake
+          
+          # 3. Fix the include directory logic
           sed -i '' 's|${SDRPP_CORE_ROOT}/src/|${SDRPP_CORE_ROOT}/core/src/|g' sdrpp_module_hack.cmake
 
       - name: Download ETSI codec
@@ -68,13 +75,17 @@ jobs:
       - name: Build
         run: |
           cd build
-          # Fix: Strip C++17 only from C compilation units
+          # Strip C++17 from C files (still necessary)
           find . -name "flags.make" -exec sed -i '' '/C_FLAGS =/s/-std=c++17//g' {} +
           
-          # Force the compiler to see the Homebrew include folder for Volk/FFTW
-          make -j$(sysctl -n hw.ncpu) CPATH="$(brew --prefix)/include"
+          # We add the Frameworks path to LIBRARY_PATH so the linker can see the dylib
+          export LIBRARY_PATH="${{ env.APP_PATH }}/Contents/Frameworks:$(brew --prefix)/lib"
+          
+          make -j$(sysctl -n hw.ncpu)
           
           if [ -f "${{ env.LIB_NAME }}" ]; then
+            # Fix the internal 'id' of the dylib so it looks for dependencies relatively
+            install_name_tool -id "@executable_path/../Plugins/${{ env.LIB_NAME }}" ${{ env.LIB_NAME }}
             otool -L ${{ env.LIB_NAME }}
           else
             echo "Build failed: ${{ env.LIB_NAME }} not found."
