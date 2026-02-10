@@ -37,24 +37,21 @@ jobs:
         run: |
           mkdir -p sdrpp_runtime
           unzip sdrpp_macos_arm.zip -d sdrpp_runtime
-          REAL_APP_PATH=$(find sdrpp_runtime -name "SDR++.app" -type d | head -n 1)
-          echo "APP_PATH=$REAL_APP_PATH" >> $GITHUB_ENV
+          CORE_LIB_FULLPATH=$(find "$GITHUB_WORKSPACE/sdrpp_runtime" -name "*sdrpp_core.dylib" | head -n 1)
+          CORE_LIB_DIR=$(dirname "$CORE_LIB_FULLPATH")
+          echo "CORE_LIB_DIR=$CORE_LIB_DIR" >> $GITHUB_ENV
+          echo "CORE_LIB_NAME=$(basename $CORE_LIB_FULLPATH)" >> $GITHUB_ENV
           cp ./.github/workflows/sdrpp_module_hack.cmake ./
 
       - name: Patch Hack Code for macOS
         run: |
-          # 1. Find the actual SDR++ core library
           CORE_LIB_FULLPATH=$(find "$GITHUB_WORKSPACE/sdrpp_runtime" -name "*sdrpp_core.dylib" | head -n 1)
-          CORE_LIB_DIR=$(dirname "$CORE_LIB_FULLPATH")
           
-          # 2. Update the hack file for the core library path
+          # Update hack file for core library path and include logic
           sed -i '' "s|\"\${SDRPP_LIB_ROOT}/libsdrpp_core.so\"|\"$CORE_LIB_FULLPATH\"|g" sdrpp_module_hack.cmake
-          
-          # 3. Fix the include directory logic
           sed -i '' 's|${SDRPP_CORE_ROOT}/src/|${SDRPP_CORE_ROOT}/core/src/|g' sdrpp_module_hack.cmake
 
-          # 4. CRITICAL: Inject Volk and FFTW linking for macOS
-          # We append these to the end of the file so they apply to the target
+          # Inject Volk and FFTW linking
           echo 'if (APPLE)' >> sdrpp_module_hack.cmake
           echo '    target_link_libraries(${PROJECT_NAME} PRIVATE volk fftw3f)' >> sdrpp_module_hack.cmake
           echo 'endif ()' >> sdrpp_module_hack.cmake
@@ -79,19 +76,42 @@ jobs:
       - name: Build
         run: |
           cd build
-          # Strip C++17 from C files
+          # Strip C++17 from C files to prevent conflicts
           find . -name "flags.make" -exec sed -i '' '/C_FLAGS =/s/-std=c++17//g' {} +
           
-          # Tell the linker where to find Homebrew libs (Volk/FFTW) AND the SDR++ Core
           export LIBRARY_PATH="${{ env.CORE_LIB_DIR }}:$(brew --prefix)/lib"
-          
           make -j$(sysctl -n hw.ncpu)
-          
+
+      - name: Make Library Portable (Fix Load Errors)
+        run: |
+          cd build
           if [ -f "${{ env.LIB_NAME }}" ]; then
-            codesign -s - ${{ env.LIB_NAME }}
+            echo "Fixing library load paths..."
+            
+            # 1. Convert absolute Volk/FFTW paths to @rpath
+            # This handles the exact error you saw
+            VOLK_PATH=$(otool -L ${{ env.LIB_NAME }} | grep libvolk | awk '{print $1}')
+            FFTW_PATH=$(otool -L ${{ env.LIB_NAME }} | grep libfftw3f | awk '{print $1}')
+            
+            install_name_tool -change "$VOLK_PATH" "@rpath/$(basename $VOLK_PATH)" ${{ env.LIB_NAME }}
+            install_name_tool -change "$FFTW_PATH" "@rpath/$(basename $FFTW_PATH)" ${{ env.LIB_NAME }}
+            
+            # 2. Add search paths so it finds Homebrew or App-bundled libs
+            install_name_tool -add_rpath "/opt/homebrew/lib" ${{ env.LIB_NAME }}
+            install_name_tool -add_rpath "/usr/local/lib" ${{ env.LIB_NAME }}
+            install_name_tool -add_rpath "@executable_path/../Frameworks" ${{ env.LIB_NAME }}
+            
+            # 3. Fix SDR++ Core reference to be relative to the App bundle
+            CORE_REF=$(otool -L ${{ env.LIB_NAME }} | grep sdrpp_core | awk '{print $1}')
+            install_name_tool -change "$CORE_REF" "@executable_path/../Frameworks/${{ env.CORE_LIB_NAME }}" ${{ env.LIB_NAME }}
+
+            # 4. Resign the binary after modifications
+            codesign -f -s - ${{ env.LIB_NAME }}
+            
+            echo "Updated Library Load Map:"
             otool -L ${{ env.LIB_NAME }}
           else
-            echo "Build failed."
+            echo "Build file not found, skipping fix."
             exit 1
           fi
 
