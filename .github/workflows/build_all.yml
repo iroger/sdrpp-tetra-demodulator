@@ -30,13 +30,13 @@ jobs:
         with:
           repo: 'AlexandreRouma/SDRPlusPlus'
           version: 'tags/nightly'
-          file: 'sdrpp_macos_x86_64.zip' 
+          file: 'sdrpp_macos_arm.zip' 
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Unpack SDR++ Core
         run: |
           mkdir -p sdrpp_runtime
-          unzip sdrpp_macos_x86_64.zip -d sdrpp_runtime
+          unzip sdrpp_macos_arm.zip -d sdrpp_runtime
           cp ./.github/workflows/sdrpp_module_hack.cmake ./
 
       - name: Download ETSI codec
