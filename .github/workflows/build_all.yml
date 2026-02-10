@@ -15,7 +15,6 @@ jobs:
       - name: Install dependencies
         run: |
           brew update
-          # Added pkg-config to help CMake find libs
           brew install fftw glfw volk zstd talloc cmake pkg-config
 
       - name: Get SDR++ source
@@ -50,13 +49,14 @@ jobs:
         run: |
           mkdir build
           cd build
-          # We explicitly set CMAKE_PREFIX_PATH to the brew root
-          # and include directories to ensure volk/volk.h is found.
+          # Setting CPATH and LIBRARY_PATH environment variables for the compiler
+          export CPATH="$(brew --prefix)/include"
+          export LIBRARY_PATH="$(brew --prefix)/lib"
+          
           cmake .. \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
             -DCMAKE_PREFIX_PATH="$(brew --prefix)" \
-            -DCMAKE_INCLUDE_PATH="$(brew --prefix)/include" \
-            -DCMAKE_LIBRARY_PATH="$(brew --prefix)/lib" \
+            -DCMAKE_CXX_FLAGS="-I$(brew --prefix)/include" \
             -DSDRPP_CORE_ROOT="$GITHUB_WORKSPACE/sdrpp_lib/core" \
             -DSDRPP_LIB_ROOT="${{ env.APP_PATH }}/Contents/Frameworks" \
             -DSDRPP_MODULE_CMAKE="$GITHUB_WORKSPACE/sdrpp_module_hack.cmake"
@@ -64,7 +64,10 @@ jobs:
       - name: Build
         run: |
           cd build
-          # Keep the C++17 flag fix for the C files
+          # Ensure the compiler sees the Homebrew headers during make
+          export CPATH="$(brew --prefix)/include"
+          
+          # Remove the problematic C++ flag from C compilation units
           find . -name "flags.make" -exec sed -i '' 's/-std=c++17//g' {} +
           
           make -j$(sysctl -n hw.ncpu)
@@ -81,4 +84,3 @@ jobs:
         with:
           name: tetra_demodulator_macos
           path: ./build/${{ env.LIB_NAME }}
-          
