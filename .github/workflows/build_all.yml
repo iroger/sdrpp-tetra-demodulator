@@ -49,14 +49,16 @@ jobs:
         run: |
           mkdir build
           cd build
-          # Setting CPATH and LIBRARY_PATH environment variables for the compiler
+          
+          # Injecting Homebrew paths into the environment for the linker and compiler
           export CPATH="$(brew --prefix)/include"
           export LIBRARY_PATH="$(brew --prefix)/lib"
           
           cmake .. \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
-            -DCMAKE_PREFIX_PATH="$(brew --prefix)" \
-            -DCMAKE_CXX_FLAGS="-I$(brew --prefix)/include" \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix);$(brew --prefix talloc)" \
+            -DCMAKE_CXX_STANDARD=17 \
+            -DCMAKE_CXX_STANDARD_REQUIRED=ON \
             -DSDRPP_CORE_ROOT="$GITHUB_WORKSPACE/sdrpp_lib/core" \
             -DSDRPP_LIB_ROOT="${{ env.APP_PATH }}/Contents/Frameworks" \
             -DSDRPP_MODULE_CMAKE="$GITHUB_WORKSPACE/sdrpp_module_hack.cmake"
@@ -64,11 +66,11 @@ jobs:
       - name: Build
         run: |
           cd build
-          # Ensure the compiler sees the Homebrew headers during make
-          export CPATH="$(brew --prefix)/include"
-          
-          # Remove the problematic C++ flag from C compilation units
+          # Re-apply the C-file fix for Clang
           find . -name "flags.make" -exec sed -i '' 's/-std=c++17//g' {} +
+          
+          # Set library path for the linker
+          export LIBRARY_PATH="$(brew --prefix)/lib"
           
           make -j$(sysctl -n hw.ncpu)
           
@@ -76,6 +78,7 @@ jobs:
             otool -L ${{ env.LIB_NAME }}
           else
             echo "Build failed: ${{ env.LIB_NAME }} not found."
+            # Check for actual linker errors if the file is missing
             exit 1
           fi
 
@@ -84,3 +87,4 @@ jobs:
         with:
           name: tetra_demodulator_macos
           path: ./build/${{ env.LIB_NAME }}
+          
