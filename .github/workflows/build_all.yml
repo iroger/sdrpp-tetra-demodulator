@@ -43,24 +43,21 @@ jobs:
 
       - name: Patch Hack Code for macOS
         run: |
-          # 1. Find the actual library path and name (absolute path)
-          # We search for the dylib and get its absolute path
+          # 1. Find the actual SDR++ core library
           CORE_LIB_FULLPATH=$(find "$GITHUB_WORKSPACE/sdrpp_runtime" -name "*sdrpp_core.dylib" | head -n 1)
-          CORE_LIB_NAME=$(basename "$CORE_LIB_FULLPATH")
           CORE_LIB_DIR=$(dirname "$CORE_LIB_FULLPATH")
           
-          echo "CORE_LIB_NAME=$CORE_LIB_NAME" >> $GITHUB_ENV
-          echo "CORE_LIB_DIR=$CORE_LIB_DIR" >> $GITHUB_ENV
-          
-          echo "Found Core Lib at: $CORE_LIB_FULLPATH"
-          
-          # 2. Update the hack file
-          # We replace the hardcoded .so path with the dynamic absolute path found
-          # Using | as a delimiter in sed because the path contains slashes
+          # 2. Update the hack file for the core library path
           sed -i '' "s|\"\${SDRPP_LIB_ROOT}/libsdrpp_core.so\"|\"$CORE_LIB_FULLPATH\"|g" sdrpp_module_hack.cmake
           
           # 3. Fix the include directory logic
           sed -i '' 's|${SDRPP_CORE_ROOT}/src/|${SDRPP_CORE_ROOT}/core/src/|g' sdrpp_module_hack.cmake
+
+          # 4. CRITICAL: Inject Volk and FFTW linking for macOS
+          # We append these to the end of the file so they apply to the target
+          echo 'if (APPLE)' >> sdrpp_module_hack.cmake
+          echo '    target_link_libraries(${PROJECT_NAME} PRIVATE volk fftw3f)' >> sdrpp_module_hack.cmake
+          echo 'endif ()' >> sdrpp_module_hack.cmake
           
       - name: Download ETSI codec
         run: |
@@ -82,20 +79,19 @@ jobs:
       - name: Build
         run: |
           cd build
-          # Remove C++17 from C compilation units
+          # Strip C++17 from C files
           find . -name "flags.make" -exec sed -i '' '/C_FLAGS =/s/-std=c++17//g' {} +
           
-          # Inject the library path into the linker environment
+          # Tell the linker where to find Homebrew libs (Volk/FFTW) AND the SDR++ Core
           export LIBRARY_PATH="${{ env.CORE_LIB_DIR }}:$(brew --prefix)/lib"
           
           make -j$(sysctl -n hw.ncpu)
           
           if [ -f "${{ env.LIB_NAME }}" ]; then
-            # Ad-hoc sign the library so macOS doesn't kill it on load
             codesign -s - ${{ env.LIB_NAME }}
             otool -L ${{ env.LIB_NAME }}
           else
-            echo "Build failed: ${{ env.LIB_NAME }} not found."
+            echo "Build failed."
             exit 1
           fi
 
