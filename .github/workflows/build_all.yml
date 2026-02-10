@@ -16,6 +16,10 @@ jobs:
         run: |
           brew update
           brew install fftw glfw volk zstd talloc cmake pkg-config
+          # Force Homebrew paths into the global GitHub Actions environment
+          echo "CPATH=$(brew --prefix)/include" >> $GITHUB_ENV
+          echo "LIBRARY_PATH=$(brew --prefix)/lib" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix)" >> $GITHUB_ENV
 
       - name: Get SDR++ source
         run: |
@@ -49,16 +53,12 @@ jobs:
         run: |
           mkdir build
           cd build
-          
-          # Injecting Homebrew paths into the environment for the linker and compiler
-          export CPATH="$(brew --prefix)/include"
-          export LIBRARY_PATH="$(brew --prefix)/lib"
-          
+          # Using -DCMAKE_CXX_FLAGS as a last resort to force the include path
           cmake .. \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
-            -DCMAKE_PREFIX_PATH="$(brew --prefix);$(brew --prefix talloc)" \
-            -DCMAKE_CXX_STANDARD=17 \
-            -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix)" \
+            -DCMAKE_CXX_FLAGS="-I$(brew --prefix)/include" \
+            -DCMAKE_C_FLAGS="-I$(brew --prefix)/include" \
             -DSDRPP_CORE_ROOT="$GITHUB_WORKSPACE/sdrpp_lib/core" \
             -DSDRPP_LIB_ROOT="${{ env.APP_PATH }}/Contents/Frameworks" \
             -DSDRPP_MODULE_CMAKE="$GITHUB_WORKSPACE/sdrpp_module_hack.cmake"
@@ -66,19 +66,16 @@ jobs:
       - name: Build
         run: |
           cd build
-          # Re-apply the C-file fix for Clang
+          # Strip the problematic C++ flag from C files
           find . -name "flags.make" -exec sed -i '' 's/-std=c++17//g' {} +
           
-          # Set library path for the linker
-          export LIBRARY_PATH="$(brew --prefix)/lib"
-          
-          make -j$(sysctl -n hw.ncpu)
+          # Pass paths directly to make to be absolutely sure
+          make -j$(sysctl -n hw.ncpu) CPATH="$(brew --prefix)/include" LIBRARY_PATH="$(brew --prefix)/lib"
           
           if [ -f "${{ env.LIB_NAME }}" ]; then
             otool -L ${{ env.LIB_NAME }}
           else
             echo "Build failed: ${{ env.LIB_NAME }} not found."
-            # Check for actual linker errors if the file is missing
             exit 1
           fi
 
@@ -87,4 +84,3 @@ jobs:
         with:
           name: tetra_demodulator_macos
           path: ./build/${{ env.LIB_NAME }}
-          
