@@ -16,10 +16,8 @@ jobs:
         run: |
           brew update
           brew install fftw glfw volk zstd talloc cmake pkg-config
-          # Force Homebrew paths into the global GitHub Actions environment
           echo "CPATH=$(brew --prefix)/include" >> $GITHUB_ENV
           echo "LIBRARY_PATH=$(brew --prefix)/lib" >> $GITHUB_ENV
-          echo "CMAKE_PREFIX_PATH=$(brew --prefix)" >> $GITHUB_ENV
 
       - name: Get SDR++ source
         run: |
@@ -43,41 +41,39 @@ jobs:
           echo "APP_PATH=$REAL_APP_PATH" >> $GITHUB_ENV
           cp ./.github/workflows/sdrpp_module_hack.cmake ./
 
+      - name: Patch Hack Code for macOS
+        run: |
+          # 1. Change .so to .dylib so the linker finds the core library
+          sed -i '' 's/libsdrpp_core.so/libsdrpp_core.dylib/g' sdrpp_module_hack.cmake
+          
+          # 2. Fix the include path logic (SDR++ core headers moved around in newer versions)
+          sed -i '' 's|${SDRPP_CORE_ROOT}/src/|${SDRPP_CORE_ROOT}/|g' sdrpp_module_hack.cmake
+
       - name: Download ETSI codec
         run: |
           cd src/decoder/etsi_codec-patches
           chmod +x download_and_patch.sh
           ./download_and_patch.sh
+
       - name: CMake Configuration
         run: |
           mkdir build
           cd build
-          export CPATH="$(brew --prefix)/include"
-          export LIBRARY_PATH="$(brew --prefix)/lib"
-          
           cmake .. \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
             -DCMAKE_PREFIX_PATH="$(brew --prefix)" \
-            -DCMAKE_CXX_STANDARD=17 \
-            -DCMAKE_CXX_STANDARD_REQUIRED=ON \
-            -DCMAKE_CXX_EXTENSIONS=OFF \
-            -DSDRPP_CORE_ROOT="$GITHUB_WORKSPACE/sdrpp_lib/core" \
+            -DSDRPP_CORE_ROOT="$GITHUB_WORKSPACE/sdrpp_lib" \
             -DSDRPP_LIB_ROOT="${{ env.APP_PATH }}/Contents/Frameworks" \
             -DSDRPP_MODULE_CMAKE="$GITHUB_WORKSPACE/sdrpp_module_hack.cmake"
 
       - name: Build
         run: |
           cd build
-          # 1. Remove the C++ flag from C files (The fix for your first error)
-          find . -name "flags.make" -exec sed -i '' 's/-std=c++17//g' {} +
+          # This removes the -std=c++17 flag ONLY from the C compiler lines in the generated makefiles
+          # leaving it intact for the C++ files.
+          find . -name "flags.make" -exec sed -i '' '/C_FLAGS =/s/-std=c++17//g' {} +
           
-          # 2. FORCE C++17 onto C++ files (The fix for your current error)
-          # This finds lines compiling .cpp files and ensures -std=c++17 is present
-          find . -name "flags.make" -exec sed -i '' 's/-std=gnu++11/-std=c++17/g' {} +
-          find . -name "flags.make" -exec sed -i '' 's/-std=c++11/-std=c++17/g' {} +
-          find . -name "flags.make" -exec sed -i '' 's/-std=c++14/-std=c++17/g' {} +
-          
-          make -j$(sysctl -n hw.ncpu) CPATH="$(brew --prefix)/include" LIBRARY_PATH="$(brew --prefix)/lib"
+          make -j$(sysctl -n hw.ncpu)
           
           if [ -f "${{ env.LIB_NAME }}" ]; then
             otool -L ${{ env.LIB_NAME }}
