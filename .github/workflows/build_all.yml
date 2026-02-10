@@ -22,8 +22,8 @@ jobs:
       - name: Get SDR++ source
         run: |
           wget https://github.com/AlexandreRouma/SDRPlusPlus/archive/refs/heads/master.tar.gz
-          mkdir -p sdrpp_lib
-          tar -zxvf master.tar.gz -C sdrpp_lib --strip-components=1
+          mkdir -p sdrpp_source
+          tar -zxvf master.tar.gz -C sdrpp_source --strip-components=1
 
       - name: Get SDR++ Core (macOS)
         uses: dsaltares/fetch-gh-release-asset@master
@@ -43,11 +43,10 @@ jobs:
 
       - name: Patch Hack Code for macOS
         run: |
-          # 1. Change .so to .dylib so the linker finds the core library
+          # 1. Change .so to .dylib for the linker
           sed -i '' 's/libsdrpp_core.so/libsdrpp_core.dylib/g' sdrpp_module_hack.cmake
-          
-          # 2. Fix the include path logic (SDR++ core headers moved around in newer versions)
-          sed -i '' 's|${SDRPP_CORE_ROOT}/src/|${SDRPP_CORE_ROOT}/|g' sdrpp_module_hack.cmake
+          # 2. Fix the include directory logic to point to the correct 'src' folder
+          sed -i '' 's|${SDRPP_CORE_ROOT}/src/|${SDRPP_CORE_ROOT}/core/src/|g' sdrpp_module_hack.cmake
 
       - name: Download ETSI codec
         run: |
@@ -62,18 +61,18 @@ jobs:
           cmake .. \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
             -DCMAKE_PREFIX_PATH="$(brew --prefix)" \
-            -DSDRPP_CORE_ROOT="$GITHUB_WORKSPACE/sdrpp_lib" \
+            -DSDRPP_CORE_ROOT="$GITHUB_WORKSPACE/sdrpp_source" \
             -DSDRPP_LIB_ROOT="${{ env.APP_PATH }}/Contents/Frameworks" \
             -DSDRPP_MODULE_CMAKE="$GITHUB_WORKSPACE/sdrpp_module_hack.cmake"
 
       - name: Build
         run: |
           cd build
-          # This removes the -std=c++17 flag ONLY from the C compiler lines in the generated makefiles
-          # leaving it intact for the C++ files.
+          # Fix: Strip C++17 only from C compilation units
           find . -name "flags.make" -exec sed -i '' '/C_FLAGS =/s/-std=c++17//g' {} +
           
-          make -j$(sysctl -n hw.ncpu)
+          # Force the compiler to see the Homebrew include folder for Volk/FFTW
+          make -j$(sysctl -n hw.ncpu) CPATH="$(brew --prefix)/include"
           
           if [ -f "${{ env.LIB_NAME }}" ]; then
             otool -L ${{ env.LIB_NAME }}
