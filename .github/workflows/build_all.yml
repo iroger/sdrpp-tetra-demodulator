@@ -48,17 +48,19 @@ jobs:
           cd src/decoder/etsi_codec-patches
           chmod +x download_and_patch.sh
           ./download_and_patch.sh
-
       - name: CMake Configuration
         run: |
           mkdir build
           cd build
-          # Using -DCMAKE_CXX_FLAGS as a last resort to force the include path
+          export CPATH="$(brew --prefix)/include"
+          export LIBRARY_PATH="$(brew --prefix)/lib"
+          
           cmake .. \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
             -DCMAKE_PREFIX_PATH="$(brew --prefix)" \
-            -DCMAKE_CXX_FLAGS="-I$(brew --prefix)/include" \
-            -DCMAKE_C_FLAGS="-I$(brew --prefix)/include" \
+            -DCMAKE_CXX_STANDARD=17 \
+            -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+            -DCMAKE_CXX_EXTENSIONS=OFF \
             -DSDRPP_CORE_ROOT="$GITHUB_WORKSPACE/sdrpp_lib/core" \
             -DSDRPP_LIB_ROOT="${{ env.APP_PATH }}/Contents/Frameworks" \
             -DSDRPP_MODULE_CMAKE="$GITHUB_WORKSPACE/sdrpp_module_hack.cmake"
@@ -66,10 +68,15 @@ jobs:
       - name: Build
         run: |
           cd build
-          # Strip the problematic C++ flag from C files
+          # 1. Remove the C++ flag from C files (The fix for your first error)
           find . -name "flags.make" -exec sed -i '' 's/-std=c++17//g' {} +
           
-          # Pass paths directly to make to be absolutely sure
+          # 2. FORCE C++17 onto C++ files (The fix for your current error)
+          # This finds lines compiling .cpp files and ensures -std=c++17 is present
+          find . -name "flags.make" -exec sed -i '' 's/-std=gnu++11/-std=c++17/g' {} +
+          find . -name "flags.make" -exec sed -i '' 's/-std=c++11/-std=c++17/g' {} +
+          find . -name "flags.make" -exec sed -i '' 's/-std=c++14/-std=c++17/g' {} +
+          
           make -j$(sysctl -n hw.ncpu) CPATH="$(brew --prefix)/include" LIBRARY_PATH="$(brew --prefix)/lib"
           
           if [ -f "${{ env.LIB_NAME }}" ]; then
