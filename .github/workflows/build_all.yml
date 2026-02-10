@@ -3,7 +3,6 @@ on: push
 
 env:
   BUILD_TYPE: Release
-  # macOS uses .dylib instead of .so
   LIB_NAME: tetra_demodulator.dylib
 
 jobs:
@@ -16,7 +15,8 @@ jobs:
       - name: Install dependencies
         run: |
           brew update
-          brew install fftw glfw volk zstd talloc cmake
+          # Added pkg-config to help CMake find libs
+          brew install fftw glfw volk zstd talloc cmake pkg-config
 
       - name: Get SDR++ source
         run: |
@@ -36,7 +36,6 @@ jobs:
         run: |
           mkdir -p sdrpp_runtime
           unzip sdrpp_macos_arm.zip -d sdrpp_runtime
-          # Locate the .app path dynamically and save it to GITHUB_ENV
           REAL_APP_PATH=$(find sdrpp_runtime -name "SDR++.app" -type d | head -n 1)
           echo "APP_PATH=$REAL_APP_PATH" >> $GITHUB_ENV
           cp ./.github/workflows/sdrpp_module_hack.cmake ./
@@ -51,10 +50,13 @@ jobs:
         run: |
           mkdir build
           cd build
-          # We add CMAKE_PREFIX_PATH so it finds Homebrew's talloc and fftw
+          # We explicitly set CMAKE_PREFIX_PATH to the brew root
+          # and include directories to ensure volk/volk.h is found.
           cmake .. \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
             -DCMAKE_PREFIX_PATH="$(brew --prefix)" \
+            -DCMAKE_INCLUDE_PATH="$(brew --prefix)/include" \
+            -DCMAKE_LIBRARY_PATH="$(brew --prefix)/lib" \
             -DSDRPP_CORE_ROOT="$GITHUB_WORKSPACE/sdrpp_lib/core" \
             -DSDRPP_LIB_ROOT="${{ env.APP_PATH }}/Contents/Frameworks" \
             -DSDRPP_MODULE_CMAKE="$GITHUB_WORKSPACE/sdrpp_module_hack.cmake"
@@ -62,13 +64,11 @@ jobs:
       - name: Build
         run: |
           cd build
-          # --- THE FIX ---
-          # This removes the C++17 flag from C files that Clang hates
+          # Keep the C++17 flag fix for the C files
           find . -name "flags.make" -exec sed -i '' 's/-std=c++17//g' {} +
           
           make -j$(sysctl -n hw.ncpu)
           
-          # Verify the build
           if [ -f "${{ env.LIB_NAME }}" ]; then
             otool -L ${{ env.LIB_NAME }}
           else
