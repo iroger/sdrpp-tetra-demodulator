@@ -25,7 +25,6 @@ jobs:
           tar -zxvf master.tar.gz -C sdrpp_lib --strip-components=1
 
       - name: Get SDR++ Core (macOS)
-        # Note: We are downloading the macOS .zip instead of the .deb
         uses: dsaltares/fetch-gh-release-asset@master
         with:
           repo: 'AlexandreRouma/SDRPlusPlus'
@@ -37,6 +36,9 @@ jobs:
         run: |
           mkdir -p sdrpp_runtime
           unzip sdrpp_macos_arm.zip -d sdrpp_runtime
+          # Locate the .app path dynamically and save it to GITHUB_ENV
+          REAL_APP_PATH=$(find sdrpp_runtime -name "SDR++.app" -type d | head -n 1)
+          echo "APP_PATH=$REAL_APP_PATH" >> $GITHUB_ENV
           cp ./.github/workflows/sdrpp_module_hack.cmake ./
 
       - name: Download ETSI codec
@@ -49,11 +51,10 @@ jobs:
         run: |
           mkdir build
           cd build
+          # We add CMAKE_PREFIX_PATH so it finds Homebrew's talloc and fftw
           cmake .. \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
-            -DCMAKE_C_STANDARD=11 \
-            -DCMAKE_CXX_STANDARD=17 \
-            -DCMAKE_CXX_EXTENSIONS=OFF \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix)" \
             -DSDRPP_CORE_ROOT="$GITHUB_WORKSPACE/sdrpp_lib/core" \
             -DSDRPP_LIB_ROOT="${{ env.APP_PATH }}/Contents/Frameworks" \
             -DSDRPP_MODULE_CMAKE="$GITHUB_WORKSPACE/sdrpp_module_hack.cmake"
@@ -61,12 +62,23 @@ jobs:
       - name: Build
         run: |
           cd build
+          # --- THE FIX ---
+          # This removes the C++17 flag from C files that Clang hates
+          find . -name "flags.make" -exec sed -i '' 's/-std=c++17//g' {} +
+          
           make -j$(sysctl -n hw.ncpu)
-          # 'otool -L' is the macOS equivalent of 'ldd'
-          otool -L ${{ env.LIB_NAME }}
+          
+          # Verify the build
+          if [ -f "${{ env.LIB_NAME }}" ]; then
+            otool -L ${{ env.LIB_NAME }}
+          else
+            echo "Build failed: ${{ env.LIB_NAME }} not found."
+            exit 1
+          fi
 
       - name: Upload library
         uses: actions/upload-artifact@v4
         with:
           name: tetra_demodulator_macos
           path: ./build/${{ env.LIB_NAME }}
+          
